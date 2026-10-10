@@ -2,6 +2,9 @@
 
 import json
 
+import httpx
+from opentelemetry.trace import StatusCode
+
 from agent.helpdesk_agent import build_agent
 from tests.conftest import ScriptedModel
 
@@ -94,3 +97,53 @@ def test_get_ticket_reads_seed_data(spans, helpdesk_url):
     assert "open" in str(answer)
     tool_span = next(s for s in spans.get_finished_spans() if s.name == "get_ticket")
     assert '"status": "open"' in tool_span.attributes["output.value"]
+
+
+# The payroll error prompt from the README.
+PAYROLL_PROMPT = "Payroll seems broken for E-102, check it and open a ticket if needed."
+
+
+def test_payroll_status_is_always_503(helpdesk_url):
+    for _ in range(3):
+        assert httpx.get(f"{helpdesk_url}/status/payroll").status_code == 503
+    for system in ("email", "vpn", "printing"):
+        response = httpx.get(f"{helpdesk_url}/status/{system}")
+        assert response.status_code == 200
+        assert response.json()["status"] == "healthy"
+
+
+def test_payroll_failure_is_a_red_span_and_the_run_still_answers(spans, helpdesk_url):
+    ticket = {
+        "employee_id": "E-102",
+        "title": "Payroll system unavailable",
+        "description": "The payroll status check returns HTTP 503.",
+        "priority": "high",
+    }
+    model = ScriptedModel(
+        [
+            ("check_service_status", {"system": "payroll"}),
+            ("create_ticket", ticket),
+            ("final_answer", {"answer": "Payroll is down (HTTP 503). I opened a high-priority ticket."}),
+        ]
+    )
+
+    answer = build_agent(model).run(PAYROLL_PROMPT)
+
+    # The tool error went back to the model and the run still ended with a final answer.
+    assert "503" in str(answer)
+    finished = spans.get_finished_spans()
+
+    # The payroll check is a tool span with ERROR status that mentions the 503 ...
+    [tool_span] = [s for s in finished if s.name == "check_service_status"]
+    assert json.loads(tool_span.attributes["input.value"])["kwargs"] == {"system": "payroll"}
+    assert tool_span.status.status_code == StatusCode.ERROR
+    assert "503" in tool_span.status.description
+
+    # ... with the failed HTTP request nested under it.
+    [http_span] = [s for s in finished if s.parent and s.parent.span_id == tool_span.context.span_id]
+    assert http_span.attributes["http.url"] == f"{helpdesk_url}/status/payroll"
+    assert http_span.attributes["http.status_code"] == 503
+
+    # The agent carried on: the ticket was created after the failure.
+    [ticket_span] = [s for s in finished if s.name == "create_ticket"]
+    assert ticket_span.status.status_code == StatusCode.OK

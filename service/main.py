@@ -10,7 +10,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from service.seed import EMPLOYEES, KB_ARTICLES, TICKETS
+from service.seed import EMPLOYEES, KB_ARTICLES, SYSTEMS, TICKETS
 
 app = FastAPI(title="Mock IT Helpdesk")
 
@@ -49,6 +49,17 @@ def get_ticket(ticket_id: str) -> dict:
     if ticket is None:
         raise HTTPException(status_code=404, detail=f"No ticket with ID {ticket_id}")
     return ticket
+
+
+@app.get("/status/{system}")
+def service_status(system: str) -> dict:
+    """Health of one internal system. Payroll is down on every call: the reproducible demo failure."""
+    name = system.lower()
+    if name not in SYSTEMS:
+        raise HTTPException(status_code=404, detail=f"Unknown system {system}. Known: {', '.join(SYSTEMS)}")
+    if name == "payroll":
+        raise HTTPException(status_code=503, detail="Payroll system is unavailable")
+    return {"system": name, "description": SYSTEMS[name], "status": "healthy"}
 
 
 class NewTicket(BaseModel):

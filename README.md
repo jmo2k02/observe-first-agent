@@ -41,8 +41,15 @@ I'm employee E-102 and my VPN keeps disconnecting every few minutes since this m
 
 Afterwards, ask about the ticket it created (use the ID from the answer, for example `What is the status of ticket T-1004?`).
 
-The agent has four tools: `lookup_employee`, `search_knowledge_base`, `get_ticket` and `create_ticket`.
-`create_ticket` is the only one that changes data. The helpdesk keeps everything in memory, so a restart of the
+**Error: a service that is down.** The payroll system is broken on purpose: its status check answers
+HTTP 503 (service unavailable) on every call, so this failure is the same on every run:
+
+```text
+Payroll seems broken for E-102, check it and open a ticket if needed.
+```
+
+The agent has five tools: `lookup_employee`, `search_knowledge_base`, `get_ticket`, `create_ticket` and
+`check_service_status`. `create_ticket` is the only one that changes data. The helpdesk keeps everything in memory, so a restart of the
 `service` container resets all tickets.
 
 ## What to look for in the trace
@@ -71,6 +78,19 @@ ToolCallingAgent.run              the whole agent run
 Models are not deterministic: run the same prompt twice and compare the traces. The order or number of steps
 can differ.
 
+### Find the red span (payroll error)
+
+Run the payroll prompt, then open its trace in Phoenix:
+
+- **The red span.** `check_service_status` has status ERROR (red). Its `GET` child is red too: it is the request
+  that failed. The step around it is marked as failed as well.
+- **The status code.** The tool span's exception event says `HTTPStatusError: Server error '503 Service
+  Unavailable'`. On the `GET` span, `http.status_code` is `503`.
+- **How the agent reacted.** The error is not the end of the run: smolagents passes it back to the model as an
+  observation. Read the next `LiteLLMModel.generate` span to see what the model made of it. It may retry, open a
+  ticket instead (`create_ticket`), or give up and explain. The run still ends with a final answer, and its
+  reaction can differ from run to run.
+
 ## How it fits together
 
 | Part | Where | What it does |
@@ -92,9 +112,10 @@ to any model ID from <https://openrouter.ai/models> that ends in `:free` and sup
 uv run pytest
 ```
 
-The tests run agent conversations (including the normal flow) against the real helpdesk service, with a scripted
-fake model instead of OpenRouter and an in-memory span exporter instead of Phoenix. They check that every tool
-call becomes a span with its arguments, with the HTTP request nested under it. No API key or internet needed.
+The tests run agent conversations (the normal flow and the payroll error) against the real helpdesk service, with a
+scripted fake model instead of OpenRouter and an in-memory span exporter instead of Phoenix. They check that every
+tool call becomes a span with its arguments, with the HTTP request nested under it, and that the payroll check is
+an error span mentioning 503 while the run still ends with an answer. No API key or internet needed.
 
 ## Why pinned?
 

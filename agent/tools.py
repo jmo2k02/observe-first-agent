@@ -75,7 +75,23 @@ def create_ticket(employee_id: str, title: str, description: str, priority: str 
     return response.json()
 
 
-TOOLS = [lookup_employee, search_knowledge_base, get_ticket, create_ticket]
+@tool
+def check_service_status(system: str) -> dict:
+    """
+    Check whether an internal company system is up: "email", "vpn", "payroll" or "printing".
+    Use this when someone says a system seems broken or unavailable, before opening a ticket.
+
+    Args:
+        system: The system name, for example "vpn".
+    """
+    response = http_client.get(f"{_helpdesk_url()}/status/{system}")
+    # An HTTP error (for example 503) raises here: smolagents shows it to the model as a tool error,
+    # and the tool span in the trace turns red (ERROR status).
+    response.raise_for_status()
+    return response.json()
+
+
+TOOLS = [lookup_employee, search_knowledge_base, get_ticket, create_ticket, check_service_status]
 
 # Name each tool's span in the trace after the tool, instead of smolagents' generic "SimpleTool".
 for _tool in TOOLS:

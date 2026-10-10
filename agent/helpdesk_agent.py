@@ -20,4 +20,4 @@ def build_model() -> Model:
 
 
 def build_agent(model: Model | None = None) -> ToolCallingAgent:
-    return ToolCallingAgent(tools=TOOLS, model=model or build_model(), max_steps=6)
+    return ToolCallingAgent(tools=TOOLS, model=model or build_model(), max_steps=8)

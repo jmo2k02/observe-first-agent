@@ -101,3 +101,12 @@ TICKETS = {
         "status": "closed",
     },
 }
+
+# Internal systems the status check knows about. "payroll" is the deliberate failure: the service
+# always answers HTTP 503 for it (see service/main.py), so the demo error is the same on every run.
+SYSTEMS = {
+    "email": "Company email and calendar",
+    "vpn": "Remote-access VPN",
+    "payroll": "Payroll and salary statements",
+    "printing": "Office printers and print queues",
+}
