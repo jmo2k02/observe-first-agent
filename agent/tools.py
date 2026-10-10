@@ -29,7 +29,53 @@ def lookup_employee(employee_id: str) -> dict:
     return response.json()
 
 
-TOOLS = [lookup_employee]
+@tool
+def search_knowledge_base(query: str) -> list:
+    """
+    Search the IT knowledge base for self-help articles with step-by-step fixes (VPN, passwords, printers, laptops).
+    Use this when someone reports an IT problem, before opening a ticket. Returns up to three matching articles.
+
+    Args:
+        query: A few keywords describing the problem, for example "VPN disconnecting".
+    """
+    response = http_client.get(f"{_helpdesk_url()}/kb/search", params={"q": query})
+    response.raise_for_status()
+    return response.json()
+
+
+@tool
+def get_ticket(ticket_id: str) -> dict:
+    """
+    Get an existing IT support ticket: who opened it, title, description, priority and status.
+    Use this when the user asks about a ticket they already have.
+
+    Args:
+        ticket_id: The ticket ID, for example "T-1002".
+    """
+    response = http_client.get(f"{_helpdesk_url()}/tickets/{ticket_id}")
+    response.raise_for_status()
+    return response.json()
+
+
+@tool
+def create_ticket(employee_id: str, title: str, description: str, priority: str = "medium") -> dict:
+    """
+    Open a new IT support ticket for an employee. This is the only tool that changes data in the helpdesk.
+    Use it when a problem needs IT support. Returns the new ticket with its ticket ID.
+
+    Args:
+        employee_id: The ID of the employee who has the problem, for example "E-102".
+        title: A short summary of the problem.
+        description: What happens, since when, and what was already tried.
+        priority: One of "low", "medium" or "high".
+    """
+    ticket = {"employee_id": employee_id, "title": title, "description": description, "priority": priority or "medium"}
+    response = http_client.post(f"{_helpdesk_url()}/tickets", json=ticket)
+    response.raise_for_status()
+    return response.json()
+
+
+TOOLS = [lookup_employee, search_knowledge_base, get_ticket, create_ticket]
 
 # Name each tool's span in the trace after the tool, instead of smolagents' generic "SimpleTool".
 for _tool in TOOLS:

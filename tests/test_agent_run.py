@@ -31,3 +31,66 @@ def test_employee_lookup_is_traced(spans, helpdesk_url):
     assert http_span.attributes["http.status_code"] == 200
     assert http_span.parent.span_id == tool_span.context.span_id
     assert http_span.context.trace_id == tool_span.context.trace_id
+
+
+# The normal-flow prompt from the README.
+NORMAL_FLOW_PROMPT = (
+    "I'm employee E-102 and my VPN keeps disconnecting every few minutes since this morning. "
+    "Please look up my details, search the knowledge base for a fix, and open an IT ticket for me."
+)
+
+
+def test_normal_flow_chains_three_tools(spans, helpdesk_url):
+    ticket = {
+        "employee_id": "E-102",
+        "title": "VPN keeps disconnecting",
+        "description": "VPN drops every few minutes since this morning.",
+        "priority": "medium",
+    }
+    model = ScriptedModel(
+        [
+            ("lookup_employee", {"employee_id": "E-102"}),
+            ("search_knowledge_base", {"query": "VPN disconnecting"}),
+            ("create_ticket", ticket),
+            ("final_answer", {"answer": "Restart the VPN client (KB-001). I opened a ticket for you."}),
+        ]
+    )
+
+    answer = build_agent(model).run(NORMAL_FLOW_PROMPT)
+
+    assert "KB-001" in str(answer)
+    finished = spans.get_finished_spans()
+    run_span = next(s for s in finished if s.name == "ToolCallingAgent.run")
+
+    # One tool span per call, each with the arguments the model chose, all in the same trace.
+    expected = [
+        ("lookup_employee", {"employee_id": "E-102"}, "GET", "/employees/E-102", "Jonas Weber"),
+        ("search_knowledge_base", {"query": "VPN disconnecting"}, "GET", "/kb/search?q=VPN+disconnecting", "KB-001"),
+        ("create_ticket", ticket, "POST", "/tickets", '"status": "open"'),
+    ]
+    for name, arguments, method, path, in_output in expected:
+        [tool_span] = [s for s in finished if s.name == name]
+        assert json.loads(tool_span.attributes["input.value"])["kwargs"] == arguments
+        assert in_output in tool_span.attributes["output.value"]
+        assert tool_span.context.trace_id == run_span.context.trace_id
+
+        # ... and exactly one HTTP span under it: the request to the helpdesk service.
+        [http_span] = [s for s in finished if s.parent and s.parent.span_id == tool_span.context.span_id]
+        assert http_span.name == method
+        assert http_span.attributes["http.url"] == helpdesk_url + path
+        assert http_span.attributes["http.status_code"] in (200, 201)
+
+
+def test_get_ticket_reads_seed_data(spans, helpdesk_url):
+    model = ScriptedModel(
+        [
+            ("get_ticket", {"ticket_id": "T-1002"}),
+            ("final_answer", {"answer": "Ticket T-1002 (new laptop for onboarding) is open."}),
+        ]
+    )
+
+    answer = build_agent(model).run("What is the status of ticket T-1002?")
+
+    assert "open" in str(answer)
+    tool_span = next(s for s in spans.get_finished_spans() if s.name == "get_ticket")
+    assert '"status": "open"' in tool_span.attributes["output.value"]

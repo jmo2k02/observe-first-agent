@@ -19,25 +19,57 @@ You need Docker and a free [OpenRouter API key](https://openrouter.ai/keys). Not
    docker compose up
    ```
 3. **Open the chat and Phoenix.**
-   - Chat: <http://localhost:7860>. Ask: `Who is employee E-102?`
+   - Chat: <http://localhost:7860>. Paste one of the [demo prompts](#demo-prompts).
    - Phoenix: <http://localhost:6006>. Open the project `observe-first-agent` and click the newest trace.
 
 (The helpdesk service's own API docs are at <http://localhost:8000/docs>.)
 
+## Demo prompts
+
+**Warm-up: one tool.**
+
+```text
+Who is employee E-102?
+```
+
+**Normal flow: several tools in one run.** An employee reports a VPN problem. The agent looks up the employee,
+searches the knowledge base and opens a ticket:
+
+```text
+I'm employee E-102 and my VPN keeps disconnecting every few minutes since this morning. Please look up my details, search the knowledge base for a fix, and open an IT ticket for me.
+```
+
+Afterwards, ask about the ticket it created (use the ID from the answer, for example `What is the status of ticket T-1004?`).
+
+The agent has four tools: `lookup_employee`, `search_knowledge_base`, `get_ticket` and `create_ticket`.
+`create_ticket` is the only one that changes data. The helpdesk keeps everything in memory, so a restart of the
+`service` container resets all tickets.
+
 ## What to look for in the trace
 
-One question becomes one trace:
+One question becomes one trace. The normal flow looks like this:
 
 ```
-ToolCallingAgent.run          the whole agent run
+ToolCallingAgent.run              the whole agent run
 ├── Step 1
-│   ├── LiteLLMModel.generate the model decides to call a tool (prompt, tokens, latency)
-│   └── lookup_employee       the tool call, with its arguments and result
-│       └── GET               the HTTP request to the helpdesk service
-└── Step 2
+│   ├── LiteLLMModel.generate     the model decides to call a tool (prompt, tokens, latency)
+│   └── lookup_employee           the tool call, with its arguments and result
+│       └── GET                   the HTTP request to the helpdesk service
+├── Step 2
+│   ├── LiteLLMModel.generate
+│   └── search_knowledge_base
+│       └── GET
+├── Step 3
+│   ├── LiteLLMModel.generate
+│   └── create_ticket             the only write: look at the arguments the model chose
+│       └── POST
+└── Step 4
     ├── LiteLLMModel.generate
     └── FinalAnswerTool
 ```
+
+Models are not deterministic: run the same prompt twice and compare the traces. The order or number of steps
+can differ.
 
 ## How it fits together
 
@@ -60,8 +92,9 @@ to any model ID from <https://openrouter.ai/models> that ends in `:free` and sup
 uv run pytest
 ```
 
-The test runs one agent conversation against the real helpdesk service, with a scripted fake model instead
-of OpenRouter and an in-memory span exporter instead of Phoenix. No API key or internet needed.
+The tests run agent conversations (including the normal flow) against the real helpdesk service, with a scripted
+fake model instead of OpenRouter and an in-memory span exporter instead of Phoenix. They check that every tool
+call becomes a span with its arguments, with the HTTP request nested under it. No API key or internet needed.
 
 ## Why pinned?
 
