@@ -1,0 +1,12 @@
+observe-first-agent
+Copyright 2026 The observe-first-agent authors
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project's agent (agent/helpdesk_agent.py, agent/app.py) is based on the
+OpenInference smolagents examples:
+  https://github.com/Arize-ai/openinference/tree/main/python/instrumentation/openinference-instrumentation-smolagents/examples
+  Copyright The OpenInference Authors, licensed under the Apache License, Version 2.0.
+Changes: OpenRouter model via LiteLLM, Phoenix registration, HTTP tools against a mock helpdesk, Gradio chat.
+
+Arize Phoenix (Elastic License 2.0) is used only as a Docker image and an installed
+dependency; none of its code is included in this repository.

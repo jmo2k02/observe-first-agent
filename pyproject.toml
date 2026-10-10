@@ -1,0 +1,31 @@
+[project]
+name = "observe-first-agent"
+version = "0.1.0"
+description = "A tiny enterprise helpdesk agent with observability switched on from line one."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12,<3.13"
+# Every dependency is pinned exactly. Agent tooling is a supply-chain target:
+# litellm 1.82.7 and 1.82.8 were compromised on PyPI (see README, "Why pinned?").
+dependencies = [
+    "smolagents[gradio]==1.26.0",
+    "litellm==1.104.2",
+    "arize-phoenix-otel==0.17.2",
+    "openinference-instrumentation-smolagents==0.1.43",
+    "opentelemetry-sdk==1.45.1",
+    "opentelemetry-instrumentation-httpx==0.66b1",
+    "httpx==0.28.1",
+    "fastapi==0.143.0",
+    "uvicorn==0.54.0",
+    "python-dotenv==1.2.4",
+]
+
+[dependency-groups]
+dev = ["pytest==9.1.1"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

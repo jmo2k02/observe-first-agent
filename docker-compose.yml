@@ -1,0 +1,34 @@
+services:
+  # Arize Phoenix: trace viewer (http://localhost:6006) and OpenTelemetry collector.
+  phoenix:
+    image: arizephoenix/phoenix:version-20.20.0
+    ports:
+      - "6006:6006"
+
+  # Mock IT-helpdesk service the agent's tools call over HTTP (http://localhost:8000/docs).
+  service:
+    build: .
+    command: uvicorn service.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 2s
+      retries: 15
+
+  # The agent with its web chat (http://localhost:7860).
+  agent:
+    build: .
+    command: python -m agent.app
+    ports:
+      - "7860:7860"
+    env_file: .env # OPENROUTER_API_KEY and optionally OPENROUTER_MODEL
+    environment:
+      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006
+      HELPDESK_URL: http://service:8000
+      GRADIO_ANALYTICS_ENABLED: "False"
+    depends_on:
+      phoenix:
+        condition: service_started
+      service:
+        condition: service_healthy
