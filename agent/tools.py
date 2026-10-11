@@ -79,7 +79,8 @@ def create_ticket(employee_id: str, title: str, description: str, priority: str 
 def check_service_status(system: str) -> dict:
     """
     Check whether an internal company system is up: "email", "vpn", "payroll" or "printing".
-    Use this when someone says a system seems broken or unavailable, before opening a ticket.
+    Always call this first when someone says a system seems broken, down or unavailable,
+    even if a ticket was requested: the status decides what the ticket should say.
 
     Args:
         system: The system name, for example "vpn".

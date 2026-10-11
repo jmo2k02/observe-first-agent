@@ -144,6 +144,8 @@ def test_payroll_failure_is_a_red_span_and_the_run_still_answers(spans, helpdesk
     assert http_span.attributes["http.url"] == f"{helpdesk_url}/status/payroll"
     assert http_span.attributes["http.status_code"] == 503
 
-    # The agent carried on: the ticket was created after the failure.
+    # The agent carried on: the ticket was created after the failure, and the run as a whole did not fail.
     [ticket_span] = [s for s in finished if s.name == "create_ticket"]
     assert ticket_span.status.status_code == StatusCode.OK
+    [run_span] = [s for s in finished if s.name == "ToolCallingAgent.run"]
+    assert run_span.status.status_code != StatusCode.ERROR

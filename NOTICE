@@ -4,7 +4,7 @@ Licensed under the Apache License, Version 2.0 (see LICENSE).
 
 Attribution: modified from Arize-ai/openinference.
 
-This project's agent (agent/helpdesk_agent.py, agent/app.py) is modified from the
+This project's agent (agent/helpdesk_agent.py, agent/app.py, agent/tracing.py) is modified from the
 OpenInference smolagents examples:
   https://github.com/Arize-ai/openinference/tree/main/python/instrumentation/openinference-instrumentation-smolagents/examples
   Copyright The OpenInference Authors, licensed under the Apache License, Version 2.0.

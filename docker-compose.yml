@@ -5,6 +5,9 @@ services:
     image: arizephoenix/phoenix:version-20.20.0@sha256:3a2e5a049f706f29c7b13bd82bcd94101bb10701874ce134ec9eb7f0299741aa
     ports:
       - "6006:6006"
+    attach: false # keep Phoenix's own log out of the `docker compose up` output (see it with: docker compose logs phoenix)
+    environment:
+      PHOENIX_LOG_MIGRATIONS: "false" # skip thousands of database set-up lines in that log
 
   # Mock IT-helpdesk service the agent's tools call over HTTP (http://localhost:8000/docs).
   service:
@@ -14,8 +17,9 @@ services:
       - "8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 2s
-      retries: 15
+      start_period: 30s
+      start_interval: 1s # check every second while starting, then only once a minute (each check is a log line)
+      interval: 60s
 
   # The agent with its web chat (http://localhost:7860).
   agent:

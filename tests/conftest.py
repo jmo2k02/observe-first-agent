@@ -11,16 +11,12 @@ import time
 import httpx
 import pytest
 import uvicorn
-from openinference.instrumentation.smolagents import SmolagentsInstrumentor
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from smolagents import ChatMessage, MessageRole, Model
 from smolagents.models import ChatMessageToolCall, ChatMessageToolCallFunction
 from smolagents.monitoring import TokenUsage
 
-from agent.tools import http_client
 from service.main import app
 
 
@@ -46,27 +42,32 @@ def helpdesk_url():
     server.should_exit = True
 
 
-@pytest.fixture
-def spans(helpdesk_url):
-    """Trace like agent/app.py does (smolagents + the tools' HTTP client), but into memory instead of Phoenix."""
+@pytest.fixture(scope="session")
+def exporter():
+    """The agent's real tracing setup (agent/tracing.py), with spans kept in memory instead of sent to Phoenix."""
+    from agent.tracing import tracer_provider
+
     exporter = InMemorySpanExporter()
-    provider = TracerProvider()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    SmolagentsInstrumentor().instrument(tracer_provider=provider)
-    HTTPXClientInstrumentor.instrument_client(http_client, tracer_provider=provider)
-    yield exporter
-    HTTPXClientInstrumentor.uninstrument_client(http_client)
-    SmolagentsInstrumentor().uninstrument()
+    tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))  # replaces the Phoenix exporter
+    return exporter
+
+
+@pytest.fixture
+def spans(helpdesk_url, exporter):
+    exporter.clear()
+    return exporter
 
 
 class ScriptedModel(Model):
-    """A fake model that replays predetermined tool calls, one per agent step."""
+    """A fake model that replays predetermined tool calls, one per agent step, and remembers what it was sent."""
 
     def __init__(self, tool_calls: list[tuple[str, dict]]):
         super().__init__(model_id="scripted-fake-model")
         self._script = iter(tool_calls)
+        self.prompts: list[str] = []  # the full model input of each step, as text
 
     def generate(self, messages, stop_sequences=None, response_format=None, tools_to_call_from=None, **kwargs):
+        self.prompts.append(str(messages))
         name, arguments = next(self._script)
         call = ChatMessageToolCall(
             id=f"call_{name}", type="function", function=ChatMessageToolCallFunction(name=name, arguments=arguments)

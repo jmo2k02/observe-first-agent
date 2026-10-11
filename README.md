@@ -4,9 +4,8 @@ A tiny enterprise IT-helpdesk agent with **observability switched on in the firs
 You chat with the agent, it calls a mock helpdesk service over HTTP, and [Arize Phoenix](https://phoenix.arize.com)
 shows a trace of every model call, tool call and HTTP request.
 
-Companion repository to the talk [*"You can't secure what you can't see"*](TODO-TALK-URL) (Agents in the Enterprise:
-Governance, Security, Observability; STADS student initiative, 12 October 2026).
-<!-- TODO before publishing: replace TODO-TALK-URL with the slides link. -->
+Companion repository to the talk *"You can't secure what you can't see"* (Agents in the Enterprise:
+Governance, Security, Observability), given at the STADS student initiative on 12 October 2026.
 
 ## Quickstart (three steps)
 
@@ -20,6 +19,8 @@ You need Docker and a free [OpenRouter API key](https://openrouter.ai/keys). Not
    ```bash
    docker compose up
    ```
+   The terminal shows the agent's log: each step and tool call as it happens. (Phoenix's own log stays out of
+   the way; see it with `docker compose logs phoenix`.)
 3. **Open the chat and Phoenix.**
    - Chat: <http://localhost:7860>. Paste one of the [demo prompts](#demo-prompts).
    - Phoenix: <http://localhost:6006>. Open the project `observe-first-agent` and click the newest trace.
@@ -30,6 +31,9 @@ The first `docker compose up` builds the image (about 2 minutes in our test) and
 (The helpdesk service's own API docs are at <http://localhost:8000/docs>.)
 
 ## Demo prompts
+
+Each question starts a fresh run: the agent does not remember earlier chat messages, so every question gets its
+own trace and you can run a prompt again to compare.
 
 **Warm-up: one tool.**
 
@@ -96,13 +100,17 @@ Run the payroll prompt, then open its trace in Phoenix:
   ticket instead (`create_ticket`), or give up and explain. The run still ends with a final answer, and its
   reaction can differ from run to run.
 - **No red span?** Now and then the model skips the status check and opens a ticket straight away. That is
-  non-determinism again, and the trace shows it: no `check_service_status` span. Ask again.
+  non-determinism again, and the trace shows it: no `check_service_status` span. Ask again: the new run starts
+  fresh, without the earlier answer.
+- **A red run at the top?** If the whole `ToolCallingAgent.run` span is red, the run itself died, usually
+  because the model was rate-limited. Its exception says why, and the chat shows the same error.
 
 ## How it fits together
 
 | Part | Where | What it does |
 |---|---|---|
-| Agent | `agent/app.py`, `agent/helpdesk_agent.py` | smolagents `ToolCallingAgent` with a Gradio chat. Tracing is registered in the first lines of `app.py`. |
+| Tracing | `agent/tracing.py` | Registers Phoenix tracing. The very first statement of `app.py` imports it, before anything else runs. |
+| Agent | `agent/app.py`, `agent/helpdesk_agent.py` | smolagents `ToolCallingAgent` with a Gradio chat. |
 | Tools | `agent/tools.py` | Thin HTTP clients for the helpdesk service. |
 | Helpdesk service | `service/` | FastAPI app with in-memory, fictional seed data. |
 | Phoenix | `docker-compose.yml` | Official image; collects and shows the traces. |
@@ -111,7 +119,9 @@ Run the payroll prompt, then open its trace in Phoenix:
 
 The default model is **`nvidia/nemotron-3-super-120b-a12b:free`** (free on OpenRouter, tested on 2026-10-11; see
 [How the default was chosen](#how-the-default-was-chosen)). Free models get rate-limited or retired, so you will
-probably need to switch at some point. Signs: the chat shows `RateLimitError` / `429`, or `404 No endpoints found`.
+probably need to switch at some point. Signs: the chat answers with **The run failed:** and `RateLimitError` / `429`,
+or `404 No endpoints found`. A short rate limit is retried once after 5 seconds; if it persists, the error shows up
+in the chat within seconds, so you can switch models or ask again.
 
 Free models also share a daily limit per OpenRouter account: 50 requests per day without credit (1,000 after a
 one-time top-up of 10 credits, per OpenRouter's error message on 2026-10-11). One agent run makes one model request
@@ -141,7 +151,7 @@ the run ends with a final answer instead of hitting the step limit.
 
 | Model (all `:free`) | Normal flow | Payroll error | Notes |
 |---|---|---|---|
-| `nvidia/nemotron-3-super-120b-a12b` | 3 of 3 | 2 of 3 | **Default.** Fast (6 to 35 s per run). In one payroll run it skipped the status check and opened a ticket straight away, so that trace had no red span: just ask again. |
+| `nvidia/nemotron-3-super-120b-a12b` | 3 of 3 | 2 of 3 | **Default.** Fast (6 to 35 s per run). In one payroll run it skipped the status check and opened a ticket straight away, so that trace had no red span: just ask again. (Since then, the `check_service_status` description tells the model to always check first.) |
 | `poolside/laguna-s-2.1` | not rated | not rated | Made a correct single tool call earlier that day; rate-limited upstream during the full test. Good first thing to try. |
 | `apodex/apodex-1.1-mini` | not rated | 0 of 1 | Retried the failing check until the step limit and wrote its last tool call as text. |
 | `nvidia/nemotron-3-ultra-550b-a55b` | not rated | 0 of 1 | Sent tool calls without the required `system` argument until the step limit. |
@@ -160,7 +170,9 @@ uv run pytest
 The tests run agent conversations (the normal flow and the payroll error) against the real helpdesk service, with a
 scripted fake model instead of OpenRouter and an in-memory span exporter instead of Phoenix. They check that every
 tool call becomes a span with its arguments, with the HTTP request nested under it, and that the payroll check is
-an error span mentioning 503 while the run still ends with an answer. No API key or internet needed.
+an error span mentioning 503 while the run still ends with an answer. Through the chat, they check that every
+question is a fresh run with its own trace and that a rate-limit error shows up in the chat at once and turns the
+run red. No API key or internet needed.
 
 ## Next steps: add human approval for write tools (`create_ticket`)
 
