@@ -12,3 +12,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY agent ./agent
 COPY service ./service
+
+# Run as an unprivileged user, not root. It owns /app only, so the chat can create its .gradio folder there;
+# the installed packages stay read-only.
+RUN useradd --create-home app && chown app /app
+USER app

@@ -28,7 +28,8 @@ You need Docker and a free [OpenRouter API key](https://openrouter.ai/keys). Not
 The first `docker compose up` builds the image (about 2 minutes in our test) and downloads the Phoenix image
 (about 320 MB). Later starts take seconds.
 
-(The helpdesk service's own API docs are at <http://localhost:8000/docs>.)
+(The helpdesk service's own API docs are at <http://localhost:8000/docs>.) All three ports are open on this
+computer only (`127.0.0.1` in `docker-compose.yml`), not to others on your network: the chat spends your API key.
 
 ## Demo prompts
 
@@ -93,8 +94,9 @@ Run the payroll prompt, then open its trace in Phoenix:
 
 - **The red span.** `check_service_status` has status ERROR (red). Its `GET` child is red too: it is the request
   that failed. The step around it is marked as failed as well.
-- **The status code.** The tool span's exception event says `HTTPStatusError: Server error '503 Service
-  Unavailable'`. On the `GET` span, `http.status_code` is `503`.
+- **The status code.** The tool span's exception event says `HTTPStatusError: 503 Service Unavailable: Payroll
+  system is unavailable`: the status code plus the service's own explanation. On the `GET` span,
+  `http.status_code` is `503`.
 - **How the agent reacted.** The error is not the end of the run: smolagents passes it back to the model as an
   observation. Read the next `LiteLLMModel.generate` span to see what the model made of it. It may retry, open a
   ticket instead (`create_ticket`), or give up and explain. The run still ends with a final answer, and its

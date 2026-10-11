@@ -11,8 +11,22 @@ from smolagents import tool
 http_client = httpx.Client(timeout=10)
 
 
-def _helpdesk_url() -> str:
-    return os.getenv("HELPDESK_URL", "http://localhost:8000")
+def _request(method: str, path: str, **kwargs):
+    """Call the helpdesk service and return its JSON answer.
+
+    An HTTP error (for example 503) raises: smolagents shows the message to the model as a tool error,
+    and the tool span in the trace turns red (ERROR status). The message includes the service's own
+    explanation ("detail"), so the model and the trace both see why the call failed.
+    """
+    response = http_client.request(method, os.getenv("HELPDESK_URL", "http://localhost:8000") + path, **kwargs)
+    if response.is_error:
+        try:
+            detail = response.json()["detail"]
+        except (ValueError, KeyError, TypeError):  # not the service's usual {"detail": ...} error body
+            detail = response.text
+        message = f"{response.status_code} {response.reason_phrase}: {detail}"
+        raise httpx.HTTPStatusError(message, request=response.request, response=response)
+    return response.json()
 
 
 @tool
@@ -24,9 +38,7 @@ def lookup_employee(employee_id: str) -> dict:
     Args:
         employee_id: The employee ID, for example "E-102".
     """
-    response = http_client.get(f"{_helpdesk_url()}/employees/{employee_id}")
-    response.raise_for_status()
-    return response.json()
+    return _request("GET", f"/employees/{employee_id}")
 
 
 @tool
@@ -38,9 +50,7 @@ def search_knowledge_base(query: str) -> list:
     Args:
         query: A few keywords describing the problem, for example "VPN disconnecting".
     """
-    response = http_client.get(f"{_helpdesk_url()}/kb/search", params={"q": query})
-    response.raise_for_status()
-    return response.json()
+    return _request("GET", "/kb/search", params={"q": query})
 
 
 @tool
@@ -52,9 +62,7 @@ def get_ticket(ticket_id: str) -> dict:
     Args:
         ticket_id: The ticket ID, for example "T-1002".
     """
-    response = http_client.get(f"{_helpdesk_url()}/tickets/{ticket_id}")
-    response.raise_for_status()
-    return response.json()
+    return _request("GET", f"/tickets/{ticket_id}")
 
 
 @tool
@@ -67,12 +75,11 @@ def create_ticket(employee_id: str, title: str, description: str, priority: str 
         employee_id: The ID of the employee who has the problem, for example "E-102".
         title: A short summary of the problem.
         description: What happens, since when, and what was already tried.
-        priority: One of "low", "medium" or "high".
+        priority: One of "low", "medium" or "high" (any other value is rejected). Defaults to "medium".
     """
-    ticket = {"employee_id": employee_id, "title": title, "description": description, "priority": priority or "medium"}
-    response = http_client.post(f"{_helpdesk_url()}/tickets", json=ticket)
-    response.raise_for_status()
-    return response.json()
+    priority = (priority or "medium").strip().lower()  # accept "High" or " high " too
+    ticket = {"employee_id": employee_id, "title": title, "description": description, "priority": priority}
+    return _request("POST", "/tickets", json=ticket)
 
 
 @tool
@@ -85,11 +92,7 @@ def check_service_status(system: str) -> dict:
     Args:
         system: The system name, for example "vpn".
     """
-    response = http_client.get(f"{_helpdesk_url()}/status/{system}")
-    # An HTTP error (for example 503) raises here: smolagents shows it to the model as a tool error,
-    # and the tool span in the trace turns red (ERROR status).
-    response.raise_for_status()
-    return response.json()
+    return _request("GET", f"/status/{system}")  # payroll answers 503: see _request
 
 
 TOOLS = [lookup_employee, search_knowledge_base, get_ticket, create_ticket, check_service_status]

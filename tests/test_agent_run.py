@@ -3,6 +3,7 @@
 import json
 
 import httpx
+import pytest
 from opentelemetry.trace import StatusCode
 
 from agent.helpdesk_agent import build_agent
@@ -149,3 +150,47 @@ def test_payroll_failure_is_a_red_span_and_the_run_still_answers(spans, helpdesk
     assert ticket_span.status.status_code == StatusCode.OK
     [run_span] = [s for s in finished if s.name == "ToolCallingAgent.run"]
     assert run_span.status.status_code != StatusCode.ERROR
+
+
+def test_tool_errors_carry_the_services_explanation(spans, helpdesk_url):
+    model = ScriptedModel(
+        [
+            ("check_service_status", {"system": "payroll"}),
+            ("check_service_status", {"system": "fax"}),
+            ("final_answer", {"answer": "Payroll is down and there is no fax system."}),
+        ]
+    )
+
+    build_agent(model).run("Are payroll and fax up?")
+
+    # The model (and the trace) see why a call failed, not just the status code.
+    payroll, fax = [s for s in spans.get_finished_spans() if s.name == "check_service_status"]
+    assert "503 Service Unavailable: Payroll system is unavailable" in payroll.status.description
+    assert "404 Not Found: Unknown system fax. Known: email, vpn, payroll, printing" in fax.status.description
+    assert "Payroll system is unavailable" in model.prompts[1]
+
+
+def test_create_ticket_accepts_any_spelling_of_the_priority(spans, helpdesk_url):
+    ticket = {"employee_id": "E-103", "title": "Monitor flickers", "description": "Since today.", "priority": " High "}
+    model = ScriptedModel([("create_ticket", ticket), ("final_answer", {"answer": "Ticket opened."})])
+
+    build_agent(model).run("My monitor flickers, I'm E-103. Open a high-priority ticket.")
+
+    [tool_span] = [s for s in spans.get_finished_spans() if s.name == "create_ticket"]
+    assert tool_span.status.status_code == StatusCode.OK
+    assert '"priority": "high"' in tool_span.attributes["output.value"]
+
+
+@pytest.mark.parametrize(
+    "query, best_article",
+    [
+        ("laptop will not boot", "KB-004"),
+        ("my laptop does not start", "KB-004"),
+        ("VPN disconnecting", "KB-001"),
+        ("printer not printing", "KB-003"),
+    ],
+)
+def test_knowledge_base_ranks_by_meaningful_words(helpdesk_url, query, best_article):
+    # Small words such as "not", "will" or "does" appear in many titles: they must not decide the ranking.
+    articles = httpx.get(f"{helpdesk_url}/kb/search", params={"q": query}).json()
+    assert articles[0]["id"] == best_article

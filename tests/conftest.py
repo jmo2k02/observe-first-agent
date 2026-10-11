@@ -11,7 +11,7 @@ import time
 import httpx
 import pytest
 import uvicorn
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from smolagents import ChatMessage, MessageRole, Model
 from smolagents.models import ChatMessageToolCall, ChatMessageToolCallFunction
@@ -44,11 +44,23 @@ def helpdesk_url():
 
 @pytest.fixture(scope="session")
 def exporter():
-    """The agent's real tracing setup (agent/tracing.py), with spans kept in memory instead of sent to Phoenix."""
+    """The agent's real tracing setup (agent/tracing.py), with spans kept in memory instead of sent to Phoenix.
+
+    Spans are batched in the background as in production, so reading them first waits for the batch.
+    """
     from agent.tracing import tracer_provider
 
-    exporter = InMemorySpanExporter()
-    tracer_provider.add_span_processor(SimpleSpanProcessor(exporter))  # replaces the Phoenix exporter
+    class BatchedInMemoryExporter(InMemorySpanExporter):
+        def get_finished_spans(self):
+            tracer_provider.force_flush()
+            return super().get_finished_spans()
+
+        def clear(self):
+            tracer_provider.force_flush()
+            super().clear()
+
+    exporter = BatchedInMemoryExporter()
+    tracer_provider.add_span_processor(BatchSpanProcessor(exporter))  # replaces the Phoenix exporter
     return exporter
 
 

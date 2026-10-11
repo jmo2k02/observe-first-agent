@@ -41,22 +41,30 @@ wait_for "helpdesk service health" http://localhost:8000/health '"ok"'
 wait_for "Phoenix interface" http://localhost:6006 "Phoenix"
 wait_for "Gradio chat interface" http://localhost:7860 "gradio"
 
-# count_spans: how many lookup_employee tool spans Phoenix has stored so far.
+# count_spans SINCE: how many lookup_employee tool spans Phoenix has stored that started at or after SINCE.
 count_spans() {
-  curl -sf "http://localhost:6006/v1/projects/observe-first-agent/spans?limit=1000" | grep -o '"name":"lookup_employee"' | wc -l || true
+  curl -sf "http://localhost:6006/v1/projects/observe-first-agent/spans?start_time=$1&limit=1000" \
+    | grep -o '"name":"lookup_employee"' | wc -l || true
 }
 
 if $REAL_RUN; then
-  before=$(count_spans)
+  sent=$(date -u +%Y-%m-%dT%H:%M:%SZ)  # only spans that start after this moment belong to the new trace
   echo "Asking the agent one question with the real model (uses your OpenRouter key) ..."
-  event=$(curl -sf -X POST http://localhost:7860/gradio_api/call/_stream_response \
-    -H 'Content-Type: application/json' -d '{"data": ["Who is employee E-102?"]}')
-  event_id=$(echo "$event" | sed -E 's/.*"event_id": *"([^"]+)".*/\1/')
+  if ! event=$(curl -sf -X POST http://localhost:7860/gradio_api/call/_stream_response \
+    -H 'Content-Type: application/json' -d '{"data": ["Who is employee E-102?"]}'); then
+    echo "FAIL  the chat did not accept the question. Check: docker compose logs agent" >&2
+    exit 1
+  fi
+  event_id=$(echo "$event" | sed -nE 's/.*"event_id": *"([^"]+)".*/\1/p')
+  if [ -z "$event_id" ]; then
+    echo "FAIL  the chat answered without an event_id: $event. Check: docker compose logs agent" >&2
+    exit 1
+  fi
   # The answer streams back as server-sent events; wait until the run is finished.
   curl -sfN --max-time 180 "http://localhost:7860/gradio_api/call/_stream_response/$event_id" > /dev/null || true
 
   for _ in $(seq 1 30); do
-    if [ "$(count_spans)" -gt "$before" ]; then
+    if [ "$(count_spans "$sent")" -gt 0 ]; then
       echo "ok    a new trace with a lookup_employee tool span arrived in Phoenix"
       echo "PASS (open http://localhost:6006 to see it)"
       exit 0

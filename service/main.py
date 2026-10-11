@@ -30,14 +30,21 @@ def get_employee(employee_id: str) -> dict:
     return employee
 
 
+# Small words that appear in many titles ("does not print", "will not connect") and say nothing about the problem.
+STOPWORDS = {"and", "are", "can", "does", "for", "has", "have", "into", "keeps", "not", "the", "will", "with", "won"}
+
+
+def _words(text: str) -> set[str]:
+    return set(re.findall(r"[a-z0-9-]+", text.lower()))
+
+
 @app.get("/kb/search")
 def search_knowledge_base(q: str) -> list[dict]:
-    """Simple keyword search: articles ranked by how many query words appear in their title or tags."""
-    words = {w for w in re.findall(r"[a-z0-9-]+", q.lower()) if len(w) > 2}
+    """Simple keyword search: articles ranked by how many query words are whole words of their title or tags."""
+    words = {w for w in _words(q) if len(w) > 2 and w not in STOPWORDS}
 
     def score(article: dict) -> int:
-        text = (article["title"] + " " + " ".join(article["tags"])).lower()
-        return sum(word in text for word in words)
+        return len(words & _words(article["title"] + " " + " ".join(article["tags"])))
 
     ranked = sorted(KB_ARTICLES, key=score, reverse=True)
     return [article for article in ranked if score(article) > 0][:3]

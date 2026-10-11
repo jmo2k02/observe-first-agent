@@ -3,7 +3,6 @@ import agent.tracing  # noqa: F401  Observability first: switch on tracing befor
 import contextvars
 
 import gradio as gr
-from dotenv import load_dotenv
 from smolagents import GradioUI
 
 from agent.helpdesk_agent import build_agent
@@ -42,5 +41,4 @@ def build_ui(helpdesk_agent=None) -> TracedGradioUI:
 
 # Entry point. Adapted from the Apache-2.0 OpenInference smolagents examples (see NOTICE).
 if __name__ == "__main__":
-    load_dotenv()  # for the plain-Python fallback; Docker Compose passes .env in directly
     build_ui().launch(share=False, server_name="0.0.0.0", server_port=7860)

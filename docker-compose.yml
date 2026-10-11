@@ -4,7 +4,7 @@ services:
   phoenix:
     image: arizephoenix/phoenix:version-20.20.0@sha256:3a2e5a049f706f29c7b13bd82bcd94101bb10701874ce134ec9eb7f0299741aa
     ports:
-      - "6006:6006"
+      - "127.0.0.1:6006:6006" # this computer only, not the local network (same for the ports below)
     attach: false # keep Phoenix's own log out of the `docker compose up` output (see it with: docker compose logs phoenix)
     environment:
       PHOENIX_LOG_MIGRATIONS: "false" # skip thousands of database set-up lines in that log
@@ -14,7 +14,7 @@ services:
     build: .
     command: uvicorn service.main:app --host 0.0.0.0 --port 8000
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       start_period: 30s
@@ -26,7 +26,7 @@ services:
     build: .
     command: python -m agent.app
     ports:
-      - "7860:7860"
+      - "127.0.0.1:7860:7860"
     env_file: .env # OPENROUTER_API_KEY and optionally OPENROUTER_MODEL
     environment:
       PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006
