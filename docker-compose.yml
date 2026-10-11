@@ -1,7 +1,8 @@
 services:
   # Arize Phoenix: trace viewer (http://localhost:6006) and OpenTelemetry collector.
+  # Official image, pinned by tag and digest. Phoenix is Elastic License 2.0: used as an image, not copied here.
   phoenix:
-    image: arizephoenix/phoenix:version-20.20.0
+    image: arizephoenix/phoenix:version-20.20.0@sha256:3a2e5a049f706f29c7b13bd82bcd94101bb10701874ce134ec9eb7f0299741aa
     ports:
       - "6006:6006"
 

@@ -4,7 +4,9 @@ A tiny enterprise IT-helpdesk agent with **observability switched on in the firs
 You chat with the agent, it calls a mock helpdesk service over HTTP, and [Arize Phoenix](https://phoenix.arize.com)
 shows a trace of every model call, tool call and HTTP request.
 
-Companion repository to the talk *"You can't secure what you can't see"*.
+Companion repository to the talk [*"You can't secure what you can't see"*](TODO-TALK-URL) (Agents in the Enterprise:
+Governance, Security, Observability; STADS student initiative, 12 October 2026).
+<!-- TODO before publishing: replace TODO-TALK-URL with the slides link. -->
 
 ## Quickstart (three steps)
 
@@ -21,6 +23,9 @@ You need Docker and a free [OpenRouter API key](https://openrouter.ai/keys). Not
 3. **Open the chat and Phoenix.**
    - Chat: <http://localhost:7860>. Paste one of the [demo prompts](#demo-prompts).
    - Phoenix: <http://localhost:6006>. Open the project `observe-first-agent` and click the newest trace.
+
+The first `docker compose up` builds the image (about 2 minutes in our test) and downloads the Phoenix image
+(about 320 MB). Later starts take seconds.
 
 (The helpdesk service's own API docs are at <http://localhost:8000/docs>.)
 
@@ -90,6 +95,8 @@ Run the payroll prompt, then open its trace in Phoenix:
   observation. Read the next `LiteLLMModel.generate` span to see what the model made of it. It may retry, open a
   ticket instead (`create_ticket`), or give up and explain. The run still ends with a final answer, and its
   reaction can differ from run to run.
+- **No red span?** Now and then the model skips the status check and opens a ticket straight away. That is
+  non-determinism again, and the trace shows it: no `check_service_status` span. Ask again.
 
 ## How it fits together
 
@@ -102,9 +109,47 @@ Run the payroll prompt, then open its trace in Phoenix:
 
 ## Changing the model
 
-The default is a free OpenRouter model that supports tool calling (see `DEFAULT_MODEL` in
-`agent/helpdesk_agent.py`). Free models get rate-limited or retired. To switch, set `OPENROUTER_MODEL` in `.env`
-to any model ID from <https://openrouter.ai/models> that ends in `:free` and supports tools, then restart.
+The default model is **`nvidia/nemotron-3-super-120b-a12b:free`** (free on OpenRouter, tested on 2026-10-11; see
+[How the default was chosen](#how-the-default-was-chosen)). Free models get rate-limited or retired, so you will
+probably need to switch at some point. Signs: the chat shows `RateLimitError` / `429`, or `404 No endpoints found`.
+
+Free models also share a daily limit per OpenRouter account: 50 requests per day without credit (1,000 after a
+one-time top-up of 10 credits, per OpenRouter's error message on 2026-10-11). One agent run makes one model request
+per step, so a demo prompt costs about 4 to 7 requests. If the error says `free-models-per-day`, switching models
+will not help: wait until the limit resets (midnight UTC).
+
+1. **Find a free model that supports tool calling.** Open <https://openrouter.ai/models?supported_parameters=tools&max_price=0>,
+   or list them in the terminal:
+   ```bash
+   curl -s "https://openrouter.ai/api/v1/models?supported_parameters=tools" | grep -o '"id":"[^"]*:free"'
+   ```
+2. **Set it in `.env`** (the ID as OpenRouter shows it, without an `openrouter/` prefix):
+   ```bash
+   OPENROUTER_MODEL=poolside/laguna-s-2.1:free
+   ```
+3. **Restart the agent:** `docker compose up -d agent`.
+4. **Check it.** Run the payroll prompt twice. A good model calls `check_service_status` and ends with an answer.
+   Small models sometimes describe a tool call in text instead of making it, or loop until the step limit:
+   you will see that in the trace too.
+
+### How the default was chosen
+
+On 2026-10-11, OpenRouter listed 14 free models with tool calling. Each candidate was run on the two demo
+prompts with the real agent and helpdesk. A run counts as a success when the model makes the right tool calls
+(normal flow: `lookup_employee`, `search_knowledge_base` and `create_ticket`; payroll: `check_service_status`) and
+the run ends with a final answer instead of hitting the step limit.
+
+| Model (all `:free`) | Normal flow | Payroll error | Notes |
+|---|---|---|---|
+| `nvidia/nemotron-3-super-120b-a12b` | 3 of 3 | 2 of 3 | **Default.** Fast (6 to 35 s per run). In one payroll run it skipped the status check and opened a ticket straight away, so that trace had no red span: just ask again. |
+| `poolside/laguna-s-2.1` | not rated | not rated | Made a correct single tool call earlier that day; rate-limited upstream during the full test. Good first thing to try. |
+| `apodex/apodex-1.1-mini` | not rated | 0 of 1 | Retried the failing check until the step limit and wrote its last tool call as text. |
+| `nvidia/nemotron-3-ultra-550b-a55b` | not rated | 0 of 1 | Sent tool calls without the required `system` argument until the step limit. |
+| `google/gemma-4-31b-it` | not rated | not rated | Rate-limited (429) when tried. |
+| `thinkingmachines/inkling` | not rated | not rated | Refused: "only available on agentic harnesses". |
+
+The remaining free models were not rated because the test account hit OpenRouter's daily limit for free models
+(see above). Free models change often, so treat this table as a snapshot and re-check with step 4.
 
 ## Tests
 
@@ -117,15 +162,67 @@ scripted fake model instead of OpenRouter and an in-memory span exporter instead
 tool call becomes a span with its arguments, with the HTTP request nested under it, and that the payroll check is
 an error span mentioning 503 while the run still ends with an answer. No API key or internet needed.
 
+## Next steps: add human approval for write tools (`create_ticket`)
+
+This is the governance exercise from the talk. Right now the agent opens tickets on its own: the trace shows
+you *that* it happened, but nothing stops it. A line in the prompt ("always ask before creating a ticket") is
+not a control: the model can ignore it. Build the control into the harness instead:
+
+1. Make `create_ticket` in `agent/tools.py` refuse to write until a human has approved it, for example by
+   returning a pending request ("Ticket draft waiting for approval: ...") instead of calling `POST /tickets`.
+2. Let the user approve or reject the draft in the chat, and only then send the request.
+3. Put the decision in the trace: add an attribute such as `approval.decision=approved` to the tool span, so
+   Phoenix shows who allowed each write.
+4. Run the normal-flow prompt again and compare the traces before and after.
+
+Further ideas: limit which tools the agent gets (least privilege), add an evaluation in Phoenix that flags runs
+with errors, or treat tool outputs as untrusted input (prompt injection arrives through data).
+
+## Without Docker (plain Python)
+
+If you cannot use Docker, run the three parts in three terminals. You need Python 3.12 and
+[uv](https://docs.astral.sh/uv/getting-started/installation/) (a single binary, no admin rights needed).
+
+```bash
+cp .env.example .env            # add your OpenRouter key
+uv sync                         # installs the exact versions from uv.lock into .venv
+
+# Terminal 1: Phoenix (same version as the Docker image)
+uvx --from arize-phoenix==20.20.0 phoenix serve
+
+# Terminal 2: the helpdesk service
+uv run uvicorn service.main:app --port 8000
+
+# Terminal 3: the agent chat
+uv run python -m agent.app
+```
+
+Then open <http://localhost:7860> and <http://localhost:6006> as in step 3. Without uv, use a virtual
+environment and `pip install --require-hashes -r requirements.txt` (generated from `uv.lock`), then
+`pip install arize-phoenix==20.20.0` and drop the `uv run` / `uvx --from ...` prefixes. Outside Docker, Phoenix
+keeps its traces in `~/.phoenix`; delete that folder to start fresh. Local models (Ollama) are not supported.
+
+## Smoke test of the whole stack
+
+```bash
+scripts/smoke.sh             # starts the stack, checks the service, Phoenix and the chat (no API key used)
+scripts/smoke.sh --real-run  # also asks the agent one question with your key and checks that a trace arrives
+```
+
+Add `--down` to stop the stack at the end.
+
 ## Why pinned?
 
-Every dependency is pinned to an exact version (`pyproject.toml`, `uv.lock`). Agent tooling is a supply-chain
-target: LiteLLM versions 1.82.7 and 1.82.8 on PyPI were compromised
-([BerriAI/litellm#24518](https://github.com/BerriAI/litellm/issues/24518)). This repository pins a version
-outside that range.
+Every dependency is pinned to an exact version: the direct ones in `pyproject.toml`, every transitive one with
+hashes in `uv.lock` (and `requirements.txt`), and the Docker images by tag and digest. Agent tooling is a
+supply-chain target. In March 2026, LiteLLM versions 1.82.7 and 1.82.8 were published to PyPI by an attacker; they
+stole SSH keys, API keys and cloud credentials from machines that installed them
+([BerriAI/litellm#24518](https://github.com/BerriAI/litellm/issues/24518)). A loose `litellm>=1.80` would have
+pulled them in automatically. This repository pins 1.104.2, outside that range. Upgrade on purpose: read the
+changelog, then run `uv lock --upgrade-package <name>` and the tests.
 
 ## License and attribution
 
-Apache License 2.0, see [LICENSE](LICENSE). The agent is based on the Apache-2.0
+Apache License 2.0, see [LICENSE](LICENSE). Modified from Arize-ai/openinference: the agent is based on the Apache-2.0
 [OpenInference smolagents examples](https://github.com/Arize-ai/openinference/tree/main/python/instrumentation/openinference-instrumentation-smolagents/examples);
 see [NOTICE](NOTICE). Phoenix (Elastic License 2.0) is used only as a Docker image and dependency.

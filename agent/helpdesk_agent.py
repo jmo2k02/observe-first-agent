@@ -9,7 +9,8 @@ from smolagents import LiteLLMModel, Model, ToolCallingAgent
 
 from agent.tools import TOOLS
 
-# A free OpenRouter model that supports tool calling. Free models rotate: see README to pick another.
+# A free OpenRouter model that supports tool calling, chosen by testing both demo prompts on 2026-10-11.
+# Free models rotate: see README, "Changing the model", to pick another.
 DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 
 

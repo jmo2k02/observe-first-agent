@@ -5,10 +5,13 @@ description = "A tiny enterprise helpdesk agent with observability switched on f
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.12,<3.13"
-# Every dependency is pinned exactly. Agent tooling is a supply-chain target:
-# litellm 1.82.7 and 1.82.8 were compromised on PyPI (see README, "Why pinned?").
+# Every dependency is pinned exactly (and uv.lock pins every transitive one, with hashes).
 dependencies = [
     "smolagents[gradio]==1.26.0",
+    # LiteLLM: never use 1.82.7 or 1.82.8. In March 2026 these two versions were published to PyPI
+    # by an attacker and stole SSH keys, API keys and cloud credentials from the machines that
+    # installed them (supply-chain attack, https://github.com/BerriAI/litellm/issues/24518).
+    # 1.104.2 is outside that range. Upgrade on purpose, never with a loose ">=".
     "litellm==1.104.2",
     "arize-phoenix-otel==0.17.2",
     "openinference-instrumentation-smolagents==0.1.43",
