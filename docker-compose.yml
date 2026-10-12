@@ -1,0 +1,39 @@
+services:
+  # Arize Phoenix: trace viewer (http://localhost:6006) and OpenTelemetry collector.
+  # Official image, pinned by tag and digest. Phoenix is Elastic License 2.0: used as an image, not copied here.
+  phoenix:
+    image: arizephoenix/phoenix:version-20.20.0@sha256:3a2e5a049f706f29c7b13bd82bcd94101bb10701874ce134ec9eb7f0299741aa
+    ports:
+      - "127.0.0.1:6006:6006" # this computer only, not the local network (same for the ports below)
+    attach: false # keep Phoenix's own log out of the `docker compose up` output (see it with: docker compose logs phoenix)
+    environment:
+      PHOENIX_LOG_MIGRATIONS: "false" # skip thousands of database set-up lines in that log
+
+  # Mock IT-helpdesk service the agent's tools call over HTTP (http://localhost:8000/docs).
+  service:
+    build: .
+    command: uvicorn service.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      start_period: 30s
+      start_interval: 1s # check every second while starting, then only once a minute (each check is a log line)
+      interval: 60s
+
+  # The agent with its web chat (http://localhost:7860).
+  agent:
+    build: .
+    command: python -m agent.app
+    ports:
+      - "127.0.0.1:7860:7860"
+    env_file: .env # OPENROUTER_API_KEY and optionally OPENROUTER_MODEL
+    environment:
+      PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:6006
+      HELPDESK_URL: http://service:8000
+      GRADIO_ANALYTICS_ENABLED: "False"
+    depends_on:
+      phoenix:
+        condition: service_started
+      service:
+        condition: service_healthy
